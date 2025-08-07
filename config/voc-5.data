@@ -1,5 +1,8 @@
-train=/data/VOC/config/trainval.txt
-test=/data/VOC/config/test.txt
-valid=/data/VOC/config/valid.txt
-names=/data/VOC/config/voc-5.names
+classes=5
+train=D:\Foggy\FogGuard\config\voc2012_train.txt
+test=D:\Foggy\FogGuard\config\voc2007_test.txt
+valid=D:\Foggy\FogGuard\config\voc2007_test.txt
+names=D:\Foggy\FogGuard\config\voc-5.names
+backup=backup/
+eval=voc
 dataset=voc

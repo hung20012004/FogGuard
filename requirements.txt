@@ -3,7 +3,7 @@ torchvision
 torchaudio
 # opencv-contrib-python
 opencv-contrib-python-headless
-numpy==1.26
+numpy==1.26.2
 pandas
 tqdm
 tensorboard

@@ -243,7 +243,7 @@ def evaluate_model(model, valid_dl, args, device, class_names, logger, epoch,
                                          model.hyperparams['height'],
                                          epoch, beta)
     else:
-        import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()
 
         metrics_output = _evaluate(model, valid_dl, device, class_names,
                                    img_size=model.hyperparams['height'],
@@ -423,10 +423,10 @@ def main():
     test_dl = test_ds.create_dataloader()
 
     # laod rtts to only validate at the end
-    rtts_config = utils.parse_data_config('config/rtts.data')
-    rtts_ds = ds.yolo_dataset(rtts_config, "test", transform, image_size,
-                              batch_size)
-    rtts_dl = rtts_ds.create_dataloader()
+    # rtts_config = utils.parse_data_config('config/rtts.data')
+    # rtts_ds = ds.yolo_dataset(rtts_config, "test", transform, image_size,
+    #                           batch_size)
+    # rtts_dl = rtts_ds.create_dataloader()
 
     voc_config = utils.parse_data_config('config/voc-5.data')
     voc_ds = ds.yolo_dataset(voc_config, "test", transform, image_size,

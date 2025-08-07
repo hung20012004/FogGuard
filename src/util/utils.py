@@ -307,11 +307,28 @@ def to_cpu(tensor):
 
 
 def load_classes(path):
-    """
-    Loads class labels at 'path'
-    """
+    # Fix path handling on Windows
+    import os
+    print(f"Original path: {repr(path)}")
+    
+    # Convert forward slashes to backslashes on Windows
+    if os.name == 'nt':
+        path = path.replace('/', '\\')
+    
+    # If path doesn't exist and looks like a relative path that got mangled
+    if not os.path.exists(path) and 'config' in path:
+        # Try to fix the path
+        if path.startswith('C:\\Users\\'):
+            # Extract the config part
+            config_part = path.split('config')[1]
+            path = f"D:\\Foggy\\FogGuard\\config{config_part}"
+    
+    print(f"Final path: {repr(path)}")
+    
     with open(path, "r") as fp:
-        names = fp.read().splitlines()
+        names = fp.read().split("\n")
+        # Remove empty lines
+        names = [name.strip() for name in names if name.strip()]
     return names
 
 

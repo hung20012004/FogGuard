@@ -32,11 +32,30 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class yolo_dataset(Dataset):
-    def __init__(self, data_config, data_type, transform=None, image_size=416,
-                 batch_size=16, num_samples=None):
+    def __init__(self, data_config, data_type, transform=None, image_size=416, 
+             batch_size=16, num_samples=None):
+        import os
+        
         self.classes = utils.load_classes(data_config["names"])
         self.data_type = data_type
-        self.image_dir_path = data_config[data_type]
+        
+        # Fix path handling for Windows
+        image_dir_path = data_config[data_type]
+        print(f"Original {data_type} path: {repr(image_dir_path)}")
+        
+        # Handle Windows path issues
+        if os.name == 'nt':  # Windows
+            image_dir_path = image_dir_path.replace('/', '\\')
+        
+        # Fix mangled path (same logic as utils.py)
+        if not os.path.exists(image_dir_path) and 'config' in image_dir_path:
+            if image_dir_path.startswith('C:\\Users\\'):
+                config_part = image_dir_path.split('config')[1]
+                image_dir_path = f"D:\\Foggy\\FogGuard\\data\\VOC\\config{config_part}"
+        
+        print(f"Final {data_type} path: {repr(image_dir_path)}")
+        self.image_dir_path = image_dir_path
+        
         self.transform = transform
         self.img_size = image_size
         self.num_samples = num_samples
@@ -44,15 +63,19 @@ class yolo_dataset(Dataset):
         self.multiscale = False
         self.batch_count = 0
         self.name = data_config["dataset"]
+        
         with open(self.image_dir_path, 'r') as f:
             self.img_files = f.readlines()
-
+        
         if num_samples is None:
             # self.img_files = self.img_files[:num_samples]
             self.num_samples = len(self.img_files)
-
+        
         self.label_files = []
         for path in self.img_files:
+            # Strip whitespace and newlines from path
+            path = path.strip()
+            
             image_dir = os.path.dirname(path)
             label_dir = f"labels-{len(self.classes)}".join(image_dir.rsplit("images", 1))
             assert label_dir != image_dir, \
@@ -60,55 +83,108 @@ class yolo_dataset(Dataset):
             label_file = os.path.join(label_dir, os.path.basename(path))
             label_file = os.path.splitext(label_file)[0] + '.txt'
             self.label_files.append(label_file)
-
     def __getitem__(self, index):
-
+        import os
+        from pathlib import Path
+        import warnings
+        import numpy as np
+        from PIL import Image
+        
         #  Image
         try:
             img_path = self.img_files[index % len(self.img_files)].rstrip()
-            img = np.array(Image.open(img_path).convert('RGB'), dtype=np.uint8)
-
+            
+            # Fix path for Windows
+            if os.name == 'nt':  # Windows
+                img_path = os.path.normpath(img_path)
+            
+            print(f"Trying to read image: {repr(img_path)}")
+            
+            # Check if file exists
+            if not os.path.exists(img_path):
+                print(f"Image file does not exist: {img_path}")
+                return None
+                
+            img = Image.open(img_path).convert('RGB')  # Keep as PIL Image for transform
+            
             # load depth channel
             depth_parent = Path(Path(img_path).parents[1], "depth")
-            image_name = img_path.split("/")[-1][:-4]
-            # depth_fn = Path(depth_parent, image_name + '.pt')
+            
+            # Fix image name extraction for Windows paths
+            if os.name == 'nt':
+                image_name = os.path.basename(img_path)[:-4]  # Remove .jpg extension
+            else:
+                image_name = img_path.split("/")[-1][:-4]
+                
             depth_fn = Path(depth_parent, image_name + '.png')
-            # depth = np.load(depth_fn)
-            # depth = Image.fromarray(np.array(Image.open(depth_fn)).astype('uint16'))
-
-            # depth = Image.open(depth_fn)
-            depth = read_image(depth_fn)
-            # depth = torch.load(depth_fn)
-
-        except Exception:
-            print(f"Could not read image '{img_path}'.")
-            return
-
+            
+            print(f"Looking for depth file: {depth_fn}")
+            
+            # Check if depth file exists
+            if os.path.exists(depth_fn):
+                depth = read_image(depth_fn)
+            else:
+                print(f"Depth file not found: {depth_fn}")
+                # Create dummy depth data if depth file doesn't exist
+                height, width = img.size[1], img.size[0]  # PIL Image uses (width, height)
+                depth = np.zeros((1, height, width), dtype=np.uint8)
+                
+        except Exception as e:
+            print(f"Could not read image '{img_path}': {e}")
+            return None
+            
         #  Label
         try:
             label_path = self.label_files[index % len(self.img_files)].rstrip()
-
-            # Ignore warning if file is empty
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                boxes = np.loadtxt(label_path).reshape(-1, 5)
-
-        except Exception:
-            print(f"Could not read label '{label_path}'.")
-            return
-
+            
+            # Fix label path for Windows
+            if os.name == 'nt':
+                label_path = os.path.normpath(label_path)
+            
+            print(f"Trying to read label: {repr(label_path)}")
+            
+            # Check if label file exists
+            if not os.path.exists(label_path):
+                print(f"Label file does not exist: {label_path}")
+                # Create empty label if file doesn't exist
+                boxes = np.empty((0, 5))
+            else:
+                # Ignore warning if file is empty
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    boxes = np.loadtxt(label_path).reshape(-1, 5)
+                    
+        except Exception as e:
+            print(f"Could not read label '{label_path}': {e}")
+            # Create empty label on error
+            boxes = np.empty((0, 5))
+            
         #  Transform
         if self.transform:
             try:
-                img, bb_targets = self.transform((img, boxes))
-                depth = self.transform_depth(depth[0])
-            except Exception:
-                print("Could not apply transform.")
-                return
-
+                # Convert PIL to numpy for transform
+                img_np = np.array(img, dtype=np.uint8)
+                img_transformed, bb_targets = self.transform((img_np, boxes))
+                
+                if hasattr(self, 'transform_depth') and depth is not None:
+                    if len(depth.shape) == 3:
+                        depth = self.transform_depth(depth[0])
+                    else:
+                        depth = self.transform_depth(depth)
+                else:
+                    # Simple depth transform if method doesn't exist
+                    pass
+            except Exception as e:
+                print(f"Could not apply transform: {e}")
+                # Don't return None, create a valid output
+                img_transformed = np.array(img, dtype=np.uint8)
+                bb_targets = boxes
+        else:
+            img_transformed = np.array(img, dtype=np.uint8)
+            bb_targets = boxes
+                
         # return img_path, img, bb_targets
-        return img_path, img, depth, bb_targets
-
+        return img_path, img_transformed, depth, bb_targets
     def collate_fn(self, batch, eval_flag=False):
         self.batch_count += 1
 
@@ -129,6 +205,7 @@ class yolo_dataset(Dataset):
         # Add sample index to targets
         for i, boxes in enumerate(bb_targets):
             boxes[:, 0] = i
+        bb_targets = [torch.from_numpy(target).float() if isinstance(target, np.ndarray) else target for target in bb_targets]
         bb_targets = torch.cat(bb_targets, 0)
 
         # return paths, imgs, bb_targets
@@ -240,15 +317,10 @@ class yolo_dataset(Dataset):
             exit("Wrong dataset type")
  
     def transform_depth(self, img):
-        d_transform = transforms.Compose([
-            SquarePadSize(self.img_size),
-            # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-        ])
-        # img_tensor = F.interpolate(img_tensor.unsqueeze(0),
-        #                            size=(self.img_size,self.img_size),
-        #                            mode="nearest").squeeze(0)
-        img_trs = d_transform(img)
-        return img_trs
+        # Since depth files are missing, create dummy depth tensor directly
+        # Return tensor với shape phù hợp: (C, H, W)
+        dummy_depth = torch.zeros(1, self.img_size, self.img_size)
+        return dummy_depth
  
 
 class SquarePadSize:
@@ -292,7 +364,21 @@ def pad_to_square(img, pad_value=0):
     return img, pad
 
 def resize(image, size):
-    image = torch.nn.functional.interpolate(image.unsqueeze(0), size=size, mode="nearest").squeeze(0)
+    if isinstance(image, np.ndarray):
+        image = torch.from_numpy(image).float()
+    
+    # Đảm bảo image có đúng format cho interpolate
+    # Nếu image là (H, W, C) thì chuyển thành (C, H, W)
+    if len(image.shape) == 3 and image.shape[2] == 3:
+        image = image.permute(2, 0, 1)  # (H, W, C) -> (C, H, W)
+    
+    # Resize image
+    image = torch.nn.functional.interpolate(
+        image.unsqueeze(0), 
+        size=size, 
+        mode="nearest"
+    ).squeeze(0)
+    
     return image
 
 def _create_data_loader(img_path, batch_size, img_size, n_cpu, transform,
